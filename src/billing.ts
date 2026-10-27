@@ -79,7 +79,7 @@ export type CreateAccountInput = {
 };
 
 const LEASE_MS = 2 * 60 * 1000;
-const MAX_ATTEMPTS = 60;
+const MAX_ATTEMPTS = 200;
 
 export function monthOf(date: Date): string {
   return date.toISOString().slice(0, 7); // "YYYY-MM", UTC
@@ -135,25 +135,48 @@ export class Billing {
     });
     if (funding.status !== "succeeded") throw new PaymentFailedError("initial funding was declined");
 
+    // The account row and the initial top-up row commit together, so an account
+    // can never exist without the payment that funded it, or the other way round.
+    const createdAt = this.now().toISOString();
     const account: Account = {
       accountId,
-      balanceCents: 0,
+      balanceCents: startingBalanceCents,
       status: "active",
       rechargeTriggerCents,
       rechargeAmountCents,
       paymentMethod,
       rechargeFailed: false,
       rechargeSeq: 0,
-      createdAt: this.now().toISOString(),
+      createdAt,
     };
     await this.db.send(
-      new PutCommand({
-        TableName: this.table,
-        Item: { pk: keys.pk(accountId), sk: keys.meta, type: "account", ...account },
-        ConditionExpression: "attribute_not_exists(pk)",
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: this.table,
+              Item: { pk: keys.pk(accountId), sk: keys.meta, type: "account", ...account },
+              ConditionExpression: "attribute_not_exists(pk)",
+            },
+          },
+          {
+            Put: {
+              TableName: this.table,
+              Item: {
+                pk: keys.pk(accountId),
+                sk: keys.topup(funding.id),
+                type: "topup",
+                paymentId: funding.id,
+                amountCents: startingBalanceCents,
+                kind: "initial",
+                createdAt,
+              },
+              ConditionExpression: "attribute_not_exists(sk)",
+            },
+          },
+        ],
       }),
     );
-    await this.creditTopUp(accountId, funding.id, startingBalanceCents, "initial");
     return this.getAccount(accountId);
   }
 
@@ -282,7 +305,7 @@ export class Billing {
         }
         // The event already exists (a concurrent duplicate won) or the counter
         // moved under us. Either way, back off briefly and go around again.
-        await sleep(2 + Math.random() * 10);
+        await sleep(2 + Math.random() * Math.min(50, 10 + attempt * 2));
         continue;
       }
 
@@ -384,7 +407,7 @@ export class Billing {
     accountId: string,
     paymentId: string,
     amountCents: number,
-    kind: "initial" | "recharge" | "manual",
+    kind: "recharge" | "manual",
     completesRechargeSeq?: number,
   ): Promise<void> {
     const pk = keys.pk(accountId);
