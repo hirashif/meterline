@@ -1,0 +1,32 @@
+{
+  "name": "usage-billing",
+  "version": "0.1.0",
+  "description": "Prepaid usage-based billing service: metering, graduated tiers, auto-recharge and reconciliation",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "db:up": "docker compose up -d dynamodb",
+    "db:down": "docker compose down",
+    "db:init": "tsx scripts/create-table.ts",
+    "dev": "tsx src/server.ts",
+    "demo": "tsx scripts/demo.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1158.0",
+    "@aws-sdk/lib-dynamodb": "^3.1158.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}
