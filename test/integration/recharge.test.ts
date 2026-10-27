@@ -67,6 +67,8 @@ describe("auto-recharge", () => {
     await ctx.billing.topUp(acct.accountId, 1_000, "t2");
     expect(ctx.payments.chargesFor(acct.accountId, "manual").filter((c) => c.status === "succeeded")).toHaveLength(1);
     expect((await ctx.billing.getAccount(acct.accountId)).balanceCents).toBe(3_500);
+    // Same key, different amount: 409, not a second charge.
+    await expect(ctx.billing.topUp(acct.accountId, 2_000, "t2")).rejects.toMatchObject({ status: 409 });
   });
 
 });

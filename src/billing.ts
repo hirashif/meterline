@@ -17,7 +17,7 @@ import {
   cancellationCodes,
   isConditionalFailure,
 } from "./errors.js";
-import { GOOD_CARD, type PaymentProvider } from "./payments.js";
+import { GOOD_CARD, IdempotencyMismatchError, type PaymentProvider } from "./payments.js";
 import { PRICING, type Product, isBillable, isProduct, unitPriceCents } from "./pricing.js";
 
 export type Account = {
@@ -605,13 +605,21 @@ export class Billing {
     checkAmount("amountCents", amountCents);
     if (!idempotencyKey) throw new ValidationError("idempotencyKey is required");
     const account = await this.getAccount(accountId);
-    const charge = await this.payments.charge({
-      accountId,
-      amountCents,
-      paymentMethod: account.paymentMethod,
-      idempotencyKey: `topup-${accountId}-${idempotencyKey}`,
-      reason: "manual",
-    });
+    let charge;
+    try {
+      charge = await this.payments.charge({
+        accountId,
+        amountCents,
+        paymentMethod: account.paymentMethod,
+        idempotencyKey: `topup-${accountId}-${idempotencyKey}`,
+        reason: "manual",
+      });
+    } catch (err) {
+      if (err instanceof IdempotencyMismatchError) {
+        throw new IdempotencyConflictError("this top-up key was already used with a different amount or card");
+      }
+      throw err;
+    }
     if (charge.status !== "succeeded") throw new PaymentFailedError("top-up was declined");
     await this.creditTopUp(accountId, charge.id, amountCents, "manual");
     await this.settle(accountId);

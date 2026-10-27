@@ -33,6 +33,10 @@ export interface PaymentProvider {
   listCharges(accountId: string): Promise<Charge[]>;
 }
 
+// A reused idempotency key sent with different parameters. Stripe rejects
+// these, and so does the fake.
+export class IdempotencyMismatchError extends Error {}
+
 export type FakeOptions = {
   // Milliseconds each charge takes, to let tests overlap requests.
   delayMs?: number;
@@ -78,7 +82,7 @@ export class FakePayments implements PaymentProvider {
         p.reason !== request.reason
       ) {
         // Stripe rejects a reused key with different parameters, so the fake does too.
-        throw new Error(`idempotency key ${request.idempotencyKey} reused with different parameters`);
+        throw new IdempotencyMismatchError(`idempotency key ${request.idempotencyKey} reused with different parameters`);
       }
       return previous.charge;
     }
