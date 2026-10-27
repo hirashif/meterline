@@ -30,11 +30,19 @@ describe("statement", () => {
 });
 
 describe("reconciliation", () => {
-  it("finds nothing wrong after normal usage, recharges and a declined card", async () => {
+  it("finds nothing wrong after concurrent usage, a recharge, a declined card, suspension and recovery", async () => {
     const acct = await ctx.billing.createAccount({ startingBalanceCents: 1_100 });
     await Promise.all(
       keysFor("r", 40).map((k) => ctx.billing.recordUsage(acct.accountId, { idempotencyKey: k, product: "eligibility" })),
     );
+    await ctx.billing.setPaymentMethod(acct.accountId, "pm_card_chargeDeclined");
+    for (let i = 0; i < 200; i++) {
+      const r = await ctx.billing.recordUsage(acct.accountId, { idempotencyKey: `d-${i}`, product: "eligibility" }).catch((e) => e);
+      if (r.status === 402 || r.status === "suspended") break;
+    }
+    expect((await ctx.billing.getAccount(acct.accountId)).status).toBe("suspended");
+    await ctx.billing.setPaymentMethod(acct.accountId, "pm_card_visa");
+    expect((await ctx.billing.getAccount(acct.accountId)).status).toBe("active");
     expect(await reconcileAccount(ctx.billing, ctx.payments, acct.accountId)).toEqual([]);
   });
 

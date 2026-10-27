@@ -33,17 +33,49 @@ export interface PaymentProvider {
   listCharges(accountId: string): Promise<Charge[]>;
 }
 
+export type FakeOptions = {
+  // Milliseconds each charge takes, to let tests overlap requests.
+  delayMs?: number;
+};
+
 export class FakePayments implements PaymentProvider {
   private byKey = new Map<string, { request: ChargeRequest; charge: Charge }>();
   private all: Charge[] = [];
   private nextId = 1;
+  private inFlight = 0;
+  // Test hooks: the most charges ever in progress at once, and a switch that
+  // makes the next charge succeed at the processor and then throw, the way a
+  // process that dies right after the card is charged would look.
+  maxInFlight = 0;
+  crashAfterNextCharge = false;
+
+  constructor(private options: FakeOptions = {}) {}
 
   async charge(request: ChargeRequest): Promise<Charge> {
+    this.inFlight++;
+    this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+    try {
+      if (this.options.delayMs) await new Promise((r) => setTimeout(r, this.options.delayMs));
+      const charge = this.record(request);
+      if (this.crashAfterNextCharge) {
+        this.crashAfterNextCharge = false;
+        throw new Error("simulated crash after the processor charged the card");
+      }
+      return charge;
+    } finally {
+      this.inFlight--;
+    }
+  }
+
+  private record(request: ChargeRequest): Charge {
     const previous = this.byKey.get(request.idempotencyKey);
     if (previous) {
+      const p = previous.request;
       if (
-        previous.request.amountCents !== request.amountCents ||
-        previous.request.accountId !== request.accountId
+        p.amountCents !== request.amountCents ||
+        p.accountId !== request.accountId ||
+        p.paymentMethod !== request.paymentMethod ||
+        p.reason !== request.reason
       ) {
         // Stripe rejects a reused key with different parameters, so the fake does too.
         throw new Error(`idempotency key ${request.idempotencyKey} reused with different parameters`);

@@ -3,7 +3,7 @@ import { Billing, monthOf } from "./billing.js";
 import { injectUnbilledCharge } from "./chaos.js";
 import { ValidationError } from "./errors.js";
 import type { PaymentProvider } from "./payments.js";
-import { reconcileAll } from "./reconcile.js";
+import { dailyJob } from "./reconcile.js";
 import { buildStatement } from "./statement.js";
 
 // The HTTP routes, written as a plain function from request to response so the
@@ -59,7 +59,7 @@ export function makeApp(config: AppConfig) {
     [
       "POST",
       /^\/reconcile$/,
-      async () => ({ status: 200, body: await reconcileAll(billing, config.payments, config.db, config.table) }),
+      async () => ({ status: 200, body: await dailyJob(billing, config.payments, config.db, config.table) }),
     ],
     [
       "POST",

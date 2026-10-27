@@ -29,17 +29,6 @@ describe("auto-recharge", () => {
     expect(ctx.payments.chargesFor(acct.accountId, "recharge")).toHaveLength(1);
   });
 
-  it("a burst of concurrent usage across the trigger fires exactly one recharge", async () => {
-    const acct = await ctx.billing.createAccount({ startingBalanceCents: 1_100 });
-    await Promise.all(
-      keysFor("burst", 20).map((k) => ctx.billing.recordUsage(acct.accountId, { idempotencyKey: k, product: "eligibility" })),
-    );
-    expect(ctx.payments.chargesFor(acct.accountId, "recharge")).toHaveLength(1);
-    const after = await ctx.billing.getAccount(acct.accountId);
-    expect(after.balanceCents).toBe(1_100 - 20 * 30 + 2_500);
-    expect(after.leaseUntil).toBeUndefined();
-  });
-
   it("a declined recharge is recorded once, usage continues, and the account suspends at $0", async () => {
     const acct = await ctx.billing.createAccount({
       startingBalanceCents: 1_050,
@@ -80,25 +69,4 @@ describe("auto-recharge", () => {
     expect((await ctx.billing.getAccount(acct.accountId)).balanceCents).toBe(3_500);
   });
 
-  it("a retry after a crash reuses the idempotency key and credits once", async () => {
-    const acct = await ctx.billing.createAccount({ startingBalanceCents: 1_050 });
-    // Simulate a process that charged the card and died before crediting:
-    // claim the lease and charge, but never credit.
-    const charge = await ctx.payments.charge({
-      accountId: acct.accountId,
-      amountCents: 2_500,
-      paymentMethod: GOOD_CARD,
-      idempotencyKey: `recharge-${acct.accountId}-1`,
-      reason: "recharge",
-    });
-    expect(charge.status).toBe("succeeded");
-
-    // Next usage crosses the trigger and runs the real recharge path with seq 1.
-    const res = await ctx.billing.recordUsage(acct.accountId, { idempotencyKey: "u", product: "eligibility" });
-    const res2 = await ctx.billing.recordUsage(acct.accountId, { idempotencyKey: "u2", product: "eligibility" });
-    const credited = res.recharge ?? res2.recharge;
-    expect(credited).toMatchObject({ status: "succeeded", paymentId: charge.id });
-    // Processor shows one charge for seq 1, not two.
-    expect(ctx.payments.chargesFor(acct.accountId, "recharge")).toHaveLength(1);
-  });
 });

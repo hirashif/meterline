@@ -131,6 +131,30 @@ export async function reconcileAccount(
   return mismatches;
 }
 
+// The daily job: first finish any recharge a crashed process left half-done,
+// then reconcile every account. Reconciliation reads each account's rows one
+// after another, not as a single snapshot, so a recharge that is in flight
+// while it runs can show up as a mismatch; run it when traffic is quiet, and
+// treat a mismatch that disappears on the next run as timing, not a bug.
+export async function dailyJob(
+  billing: Billing,
+  payments: PaymentProvider,
+  db: DynamoDBDocumentClient,
+  table: string,
+  now: Date = new Date(),
+): Promise<ReconcileReport & { recoveredRecharges: number }> {
+  let recoveredRecharges = 0;
+  for (const id of await listAccountIds(db, table)) {
+    const account = await billing.getAccount(id);
+    if (account.pendingAmountCents !== undefined && (account.leaseUntil ?? 0) < now.getTime()) {
+      const outcome = await billing.settle(id);
+      if (outcome && outcome.status !== "skipped") recoveredRecharges++;
+    }
+  }
+  const report = await reconcileAll(billing, payments, db, table, now);
+  return { ...report, recoveredRecharges };
+}
+
 export async function reconcileAll(
   billing: Billing,
   payments: PaymentProvider,
