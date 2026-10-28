@@ -1,4 +1,4 @@
-# usage-billing
+# meterline
 
 A prepaid, usage-based billing service. Customers fund a balance, every API call is metered and priced on graduated monthly tiers, the balance recharges itself from a saved card when it runs low, and a reconciliation job checks that the money adds up.
 
